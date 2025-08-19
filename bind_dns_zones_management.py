@@ -1,19 +1,27 @@
 import os
 import re
 import shutil
+import ipaddress
 from datetime import datetime
 
 ZONE_CONFIG_PATH = "/etc/bind/named.conf.local"
 BACKUP_DIR = "/etc/bind/zone_backups"
 ZONE_FILE_PATH = None
 
-VALID_RECORD_TYPES = {"A", "CNAME", "MX", "TXT", "NS", "PTR"}
+VALID_RECORD_TYPES = {"A", "AAAA", "CNAME", "MX", "TXT", "NS", "PTR", "SRV"}
 
 def is_valid_domain(name):
     return re.match(r"^[a-zA-Z0-9._-]+\.[a-zA-Z]{2,}$", name)
 
 def is_valid_ip(ip):
     return re.match(r"^\d{1,3}(\.\d{1,3}){3}$", ip)
+
+def is_valid_ipv6(ip):
+    try:
+        ipaddress.IPv6Address(ip)
+        return True
+    except ipaddress.AddressValueError:
+        return False
 
 def list_zones():
     zones = {}
@@ -50,6 +58,7 @@ def select_zone(zones):
             print("❌ Invalid selection.")
     except ValueError:
         print("❌ Please enter a valid number.")
+
 def backup_zone_file():
     if not ZONE_FILE_PATH:
         print("⚠️ No zone selected.")
@@ -72,7 +81,36 @@ def list_records():
         for line in zone_file:
             print(line.strip())
 
-def add_record(record_type, name, value, ttl=3600, priority=None):
+def prompt_srv_details():
+    name = input("Enter SRV name (e.g. _sip._tcp): ")
+    if not re.match(r"^_[a-zA-Z0-9]+\._(tcp|udp)$", name):
+        print("❌ Invalid SRV name format.")
+        return None
+    value = input("Enter target hostname: ")
+    try:
+        ttl = int(input("Enter TTL (default 3600): ") or "3600")
+        priority = int(input("Enter priority: "))
+        weight = int(input("Enter weight: "))
+        port = int(input("Enter port: "))
+    except ValueError:
+        print("❌ Priority, weight, port, and TTL must be integers.")
+        return None
+    return {
+        "name": name,
+        "value": value,
+        "ttl": ttl,
+        "priority": priority,
+        "weight": weight,
+        "port": port
+    }
+
+def preview_record(record):
+    print("\n👀 Preview:")
+    print(record.strip())
+    confirm = input("Proceed with adding this record? (y/n): ").lower()
+    return confirm == "y"
+
+def add_record(record_type, name, value, ttl=3600, priority=None, weight=None, port=None):
     if not ZONE_FILE_PATH or not os.path.exists(ZONE_FILE_PATH):
         print("⚠️ No valid zone file selected. Please choose a zone first.")
         return
@@ -82,8 +120,6 @@ def add_record(record_type, name, value, ttl=3600, priority=None):
         print("❌ Unsupported record type.")
         return
 
-    backup_zone_file()
-
     if record_type == "MX":
         if priority is None:
             print("❌ MX records require a priority value.")
@@ -92,169 +128,176 @@ def add_record(record_type, name, value, ttl=3600, priority=None):
     elif record_type == "TXT":
         value = f'"{value}"'
         record = f"{name}\t{ttl}\tIN\tTXT\t{value}\n"
+    elif record_type == "SRV":
+        if None in (priority, weight, port):
+            print("❌ SRV records require priority, weight, and port.")
+            return
+        record = f"{name}\t{ttl}\tIN\tSRV\t{priority} {weight} {port} {value}\n"
+    elif record_type == "AAAA":
+        if not is_valid_ipv6(value):
+            print("❌ Invalid IPv6 address.")
+            return
+        record = f"{name}\t{ttl}\tIN\tAAAA\t{value}\n"
     else:
         record = f"{name}\t{ttl}\tIN\t{record_type}\t{value}\n"
 
+    if not preview_record(record):
+        print("🚫 Record addition cancelled.")
+        return
+
+    backup_zone_file()
     with open(ZONE_FILE_PATH, "a") as zone_file:
         zone_file.write(record)
     print(f"✅ Record added: {record.strip()}")
     update_serial()
-
-def delete_record(name):
-    if not ZONE_FILE_PATH or not os.path.exists(ZONE_FILE_PATH):
-        print("⚠️ No valid zone file selected. Please choose a zone first.")
+def delete_record():
+    if not ZONE_FILE_PATH:
+        print("⚠️ No zone selected.")
         return
-
-    backup_zone_file()
+    list_records()
+    target = input("Enter the exact line to delete: ").strip()
     with open(ZONE_FILE_PATH, "r") as zone_file:
         lines = zone_file.readlines()
+    if target not in [line.strip() for line in lines]:
+        print("❌ Record not found.")
+        return
+    backup_zone_file()
     with open(ZONE_FILE_PATH, "w") as zone_file:
         for line in lines:
-            if re.match(rf'^{re.escape(name)}\s', line):
-                continue
-            zone_file.write(line)
-    print(f"🧹 Records named '{name}' deleted.")
+            if line.strip() != target:
+                zone_file.write(line)
+    print(f"🗑 Record deleted: {target}")
     update_serial()
 
-def update_record(record_type, name, value, ttl=3600, priority=None):
-    delete_record(name)
-    add_record(record_type, name, value, ttl, priority)
+def update_record():
+    if not ZONE_FILE_PATH:
+        print("⚠️ No zone selected.")
+        return
+    list_records()
+    target = input("Enter the exact line to update: ").strip()
+    with open(ZONE_FILE_PATH, "r") as zone_file:
+        lines = zone_file.readlines()
+    if target not in [line.strip() for line in lines]:
+        print("❌ Record not found.")
+        return
+    print("✏️ Enter new record details:")
+    rtype = input("Record type (A, AAAA, CNAME, MX, TXT, NS, PTR, SRV): ").upper()
+    name = input("Record name: ")
+    value = input("Record value: ")
+    ttl = input("TTL (default 3600): ")
+    ttl = int(ttl) if ttl.isdigit() else 3600
+    if rtype == "MX":
+        priority = int(input("Priority: "))
+        new_record = f"{name}\t{ttl}\tIN\tMX\t{priority} {value}\n"
+    elif rtype == "SRV":
+        priority = int(input("Priority: "))
+        weight = int(input("Weight: "))
+        port = int(input("Port: "))
+        new_record = f"{name}\t{ttl}\tIN\tSRV\t{priority} {weight} {port} {value}\n"
+    elif rtype == "TXT":
+        new_record = f"{name}\t{ttl}\tIN\tTXT\t\"{value}\"\n"
+    elif rtype == "AAAA":
+        if not is_valid_ipv6(value):
+            print("❌ Invalid IPv6 address.")
+            return
+        new_record = f"{name}\t{ttl}\tIN\tAAAA\t{value}\n"
+    else:
+        new_record = f"{name}\t{ttl}\tIN\t{rtype}\t{value}\n"
+    if not preview_record(new_record):
+        print("🚫 Update cancelled.")
+        return
+    backup_zone_file()
+    with open(ZONE_FILE_PATH, "w") as zone_file:
+        for line in lines:
+            if line.strip() == target:
+                zone_file.write(new_record)
+            else:
+                zone_file.write(line)
+    print(f"✅ Record updated:\n{target} → {new_record.strip()}")
+    update_serial()
 
 def update_serial():
     if not ZONE_FILE_PATH:
-        print("⚠️ No zone selected.")
         return
     with open(ZONE_FILE_PATH, "r") as zone_file:
         lines = zone_file.readlines()
     for i, line in enumerate(lines):
-        if re.match(r'^\s*\d+\s*;\s*serial', line):
-            current_serial = int(line.split(";")[0].strip())
-            new_serial = max(current_serial + 1, int(datetime.now().strftime("%Y%m%d01")))
-            lines[i] = f"{new_serial}\t; serial\n"
-            print(f"🔄 Serial updated: {current_serial} → {new_serial}")
-            break
+        if "Serial" in line or re.search(r"\d{10}", line):
+            match = re.search(r"(\d{10})", line)
+            if match:
+                old_serial = match.group(1)
+                new_serial = datetime.now().strftime("%Y%m%d%H")
+                lines[i] = line.replace(old_serial, new_serial)
+                print(f"🔄 Serial updated: {old_serial} → {new_serial}")
+                break
     with open(ZONE_FILE_PATH, "w") as zone_file:
         zone_file.writelines(lines)
 
-def check_zone_syntax():
-    if not ZONE_FILE_PATH:
-        print("⚠️ No zone selected.")
-        return False
-    zone_name = os.path.basename(ZONE_FILE_PATH).split(".")[0]
-    result = os.system(f"named-checkzone {zone_name} {ZONE_FILE_PATH}")
+def check_syntax():
+    print("🔍 Checking BIND syntax...")
+    result = os.system("named-checkconf")
     if result == 0:
-        print("✅ Zone syntax is valid.")
-        return True
+        print("✅ named.conf syntax OK.")
     else:
-        print("❌ Zone syntax error. Fix before reload.")
-        return False
+        print("❌ named.conf syntax error.")
+    if ZONE_FILE_PATH:
+        result = os.system(f"named-checkzone {os.path.basename(ZONE_FILE_PATH)} {ZONE_FILE_PATH}")
+        if result == 0:
+            print("✅ Zone file syntax OK.")
+        else:
+            print("❌ Zone file syntax error.")
 
 def reload_bind():
-    if not ZONE_FILE_PATH:
-        print("⚠️ No zone selected.")
-        return
-    if not check_zone_syntax():
-        return
-    if shutil.which("rndc"):
-        result = os.system("rndc reload")
-        if result == 0:
-            print("🔁 BIND reloaded successfully.")
-        else:
-            print("❌ Failed to reload BIND with rndc.")
+    print("🔄 Reloading BIND service...")
+    result = os.system("systemctl reload bind9")
+    if result == 0:
+        print("✅ BIND reloaded successfully.")
     else:
-        print("⚠️ 'rndc' not found. Try 'sudo systemctl restart bind9' manually.")
+        print("❌ Failed to reload BIND.")
+
 def main():
+    zones = list_zones()
+    select_zone(zones)
     while True:
-        print("\n🔧 DNS Zone Manager")
-        print("1. List zones")
-        print("2. Select zone")
-        print("3. List records")
-        print("4. Add record")
-        print("5. Delete record")
-        print("6. Update record")
-        print("7. Reload BIND")
-        print("8. Exit")
-
-        choice = input("Enter your choice: ")
-
+        print("\n🛠 Available actions:")
+        print("1. List records")
+        print("2. Add record")
+        print("3. Delete record")
+        print("4. Update record")
+        print("5. Check syntax")
+        print("6. Reload BIND")
+        print("7. Exit")
+        choice = input("Choose an action: ").strip()
         if choice == "1":
-            zones = list_zones()
-        elif choice == "2":
-            zones = list_zones()
-            select_zone(zones)
-        elif choice == "3":
             list_records()
-        elif choice == "4":
-            record_type = input("Enter record type (A, CNAME, MX, TXT, NS, PTR): ").upper()
-            if record_type not in VALID_RECORD_TYPES:
-                print("❌ Invalid record type.")
-                continue
-
+        elif choice == "2":
+            rtype = input("Enter record type (A, AAAA, CNAME, MX, TXT, NS, PTR, SRV): ").upper()
             name = input("Enter record name: ")
             value = input("Enter record value: ")
-            ttl_input = input("Enter TTL (default 3600): ") or "3600"
-
-            try:
-                ttl = int(ttl_input)
-                if ttl <= 0:
-                    raise ValueError
-            except ValueError:
-                print("❌ Invalid TTL.")
-                continue
-
-            if record_type == "MX":
-                priority_input = input("Enter MX priority: ")
-                try:
-                    priority = int(priority_input)
-                except ValueError:
-                    print("❌ Invalid priority.")
-                    continue
-                add_record(record_type, name, value, ttl, priority)
+            ttl = input("Enter TTL (default 3600): ")
+            ttl = int(ttl) if ttl.isdigit() else 3600
+            if rtype == "MX":
+                priority = int(input("Enter priority: "))
+                add_record(rtype, name, value, ttl, priority=priority)
+            elif rtype == "SRV":
+                srv = prompt_srv_details()
+                if srv:
+                    add_record("SRV", srv["name"], srv["value"], srv["ttl"], srv["priority"], srv["weight"], srv["port"])
             else:
-                add_record(record_type, name, value, ttl)
-
+                add_record(rtype, name, value, ttl)
+        elif choice == "3":
+            delete_record()
+        elif choice == "4":
+            update_record()
         elif choice == "5":
-            name = input("Enter record name to delete: ")
-            delete_record(name)
-
+            check_syntax()
         elif choice == "6":
-            record_type = input("Enter record type (A, CNAME, MX, TXT, NS, PTR): ").upper()
-            if record_type not in VALID_RECORD_TYPES:
-                print("❌ Invalid record type.")
-                continue
-
-            name = input("Enter record name: ")
-            value = input("Enter new value: ")
-            ttl_input = input("Enter TTL (default 3600): ") or "3600"
-
-            try:
-                ttl = int(ttl_input)
-                if ttl <= 0:
-                    raise ValueError
-            except ValueError:
-                print("❌ Invalid TTL.")
-                continue
-
-            if record_type == "MX":
-                priority_input = input("Enter MX priority: ")
-                try:
-                    priority = int(priority_input)
-                except ValueError:
-                    print("❌ Invalid priority.")
-                    continue
-                update_record(record_type, name, value, ttl, priority)
-            else:
-                update_record(record_type, name, value, ttl)
-
-        elif choice == "7":
             reload_bind()
-
-        elif choice == "8":
-            print("👋 Goodbye! Exiting DNS Zone Manager.")
+        elif choice == "7":
+            print("👋 Exiting DNS Zone Manager.")
             break
-
         else:
-            print("❌ Invalid choice. Please enter a number between 1 and 8.")
+            print("❌ Invalid choice.")
 
 if __name__ == "__main__":
     main()
