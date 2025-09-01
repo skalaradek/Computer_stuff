@@ -19,6 +19,9 @@ docker volume ls                    # List volumes
 docker volume rm <volume>           # Remove volume
 docker network ls                   # List networks
 docker network create <name>        # Create network
+docker ps -q | xargs -n 1 docker inspect --format \
+  '{{ .Name }} {{range .NetworkSettings.Networks}} {{.IPAddress}}{{end}}' \
+  | sed 's#^/##'                    # Show hostnames with IP addresses
 ```
 ### 🔍 Inspect & Logs
 ```
@@ -95,7 +98,7 @@ docker run --rm -v mydata:/data -v $(pwd):/backup alpine \
   tar xzf /backup/mydata-backup.tar.gz -C /data
 ```
 ### 🐘 PostgreSQL Backup
-🔄 Backup
+#### 🔄 Backup
 ```
 docker exec -t <postgres_container> \
   pg_dump -U <username> <database> > backup.sql
@@ -107,13 +110,13 @@ docker exec -t my_postgres \
 ```
 This dumps the database mydb to a file on your host machine.
 
-🔁 Restore  
+#### 🔁 Restore
 ```
 cat mydb-backup.sql | docker exec -i <postgres_container> \
   psql -U <username> <database>
 ```
-### 🐬 MySQL / MariaDB Backup  
-🔄 Backup  
+### 🐬 MySQL / MariaDB Backup
+#### 🔄 Backup
 ```
 docker exec <mysql_container> \
   mysqldump -u <username> -p<password> <database> > backup.sql
@@ -124,13 +127,43 @@ docker exec my_mysql \
   mysqldump -u root -psecret mydb > mydb-backup.sql
 ```  
   
-🔁 Restore  
-
+#### 🔁 Restore
 ```
 cat mydb-backup.sql | docker exec -i <mysql_container> \
   mysql -u <username> -p<password> <database>
 ```
-
-
+  
+### 🧠 Docker Image Management Cheat Sheet
+#### 🏗️ Create an Image from a Container
+`docker commit <container_id> my-image:tag`  
+Saves the current state of a container as a new image.  
+  
+#### 🏷️ Tag an Image
+`docker tag my-image:tag username/my-image:tag`  
+Prepares the image for pushing to a registry.  
+  
+#### 🚀 Push Image to Docker Hub
+`docker push username/my-image:tag`  
+Uploads the image to Docker Hub or another registry.  
+  
+#### 📥 Pull Image from Registry
+`docker pull username/my-image:tag`  
+Downloads the image from a registry.  
+  
+#### 📦 Save Image to Tar File
+`docker save -o my-image.tar my-image:tag`  
+Exports the image as a .tar archive for sharing offline.  
+  
+#### 📂 Load Image from Tar File
+`docker load -i my-image.tar`  
+Imports the image from a .tar archive.  
+  
+#### 🗑️ Remove Image
+`docker rmi my-image:tag`  
+Deletes the image from your local system.  
+  
+#### 📋 List Local Images
+`docker images`  
+Shows all images stored locally.  
 
 
