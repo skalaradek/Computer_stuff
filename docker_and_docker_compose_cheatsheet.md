@@ -133,7 +133,7 @@ cat mydb-backup.sql | docker exec -i <mysql_container> \
   mysql -u <username> -p<password> <database>
 ```
   
-### 🧠 Docker Image Management Cheat Sheet
+### 🧠 Docker Image Management
 #### 🏗️ Create an Image from a Container
 `docker commit <container_id> my-image:tag`  
 Saves the current state of a container as a new image.  
