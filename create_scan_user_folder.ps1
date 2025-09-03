@@ -7,8 +7,8 @@ $password = ConvertTo-SecureString "!!!CHANGEME!!!" -AsPlainText -Force
 $folderPath = "C:\Scan"
 $shareName = "Scan"
 
-# Create a new user account with password set to never expire
-New-LocalUser -Name $username -Password $password -FullName "Share Access User" -Description "User for share access only" -PasswordNeverExpires $true
+# Create a new user account with user and password set to never expire
+New-LocalUser -Name $username -Password $password -FullName "Share Access User" -Description "User for share access only" -PasswordNeverExpires $true -AccountNeverExpires $true -UserMayNotChangePassword $true
 
 
 # Add the user to the Guests group (optional: adjust based on your needs)
