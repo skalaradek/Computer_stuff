@@ -19,10 +19,11 @@ foreach ($key in $sessionKeys) {
 
         if ($colour14.Colour14 -eq "0,0,187") {
             # Update the value to the new color
-            Set-ItemProperty -Path $keyPath -Name "Colour14" -Value "61,148,254"
+            Set-ItemProperty -Path $keyPath -Name "Colour14" -Value "60,84,255"
             Write-Host "Updated Colour14 in $($key.PSChildName)"
         }
     } catch {
         Write-Host "Error accessing $($key.PSChildName): $_"
     }
 }
+
