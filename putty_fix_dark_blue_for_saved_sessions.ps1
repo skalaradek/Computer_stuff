@@ -3,7 +3,7 @@
 # and run saved script
 
 # Fix saved sessions for ANSI Blue too dark
-# For new sessions open Putty in Windows - Colours - ANSI Blue set 61,148,254 and save as Default Settings
+# For new sessions open Putty in Windows - Colours - ANSI Blue set 60,84,255 and save as Default Settings
 
 # Define the base registry path
 $basePath = "HKCU:\SOFTWARE\SimonTatham\PuTTY\Sessions"
@@ -26,4 +26,5 @@ foreach ($key in $sessionKeys) {
         Write-Host "Error accessing $($key.PSChildName): $_"
     }
 }
+
 
