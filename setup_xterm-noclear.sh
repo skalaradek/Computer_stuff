@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 # Remove screen clearing after closing less, vim etc
 # Tested Ubuntu 22.04 with root user
